@@ -99,17 +99,21 @@ def do_live_tail():
     lid = 0
 
     while True:
-        # print('Doing http post to {} data {} headers {}'.format(url, json.dumps(req), headers))
-        r = requests.post( endpoint, data=json.dumps(req), headers=headers, verify=False)
+        #print('Doing http post to {} data {} headers {}'.format( endpoint, json.dumps(req), headers ) )
+        try:
+            r = requests.post( endpoint, data=json.dumps(req), headers=headers, verify=False)
+        except Exception as e:
+            print( "ERROR: Unable to connect to livetail server ({})".format( e ) )
+            sys.exit( 1 )
         if r.status_code != 200:
-            print('server error status_code {}'.format(r.status_code))
-            sys.exit()
+            print('ERROR: Server error status_code {} ({})'.format( r.status_code, r.text.strip() ) )
+            sys.exit( 1 )
 
         jres = r.json()
         estr = jres['error']
         if len(estr) > 0:
             print('server error string {}'.format(estr))
-            sys.exit()
+            sys.exit( 1 )
 
         # print(json.dumps(jres))
         lines = jres['lines']
