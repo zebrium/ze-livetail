@@ -1,0 +1,133 @@
+#!/usr/bin/python3
+
+import os
+import re
+import argparse
+import requests
+import time
+import json
+import sys
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+def get_endpoint( url ):
+    return( url+'/api/v2/livetail' )
+
+def read_zerc():
+    url       = None
+    auth      = None
+    home_dir  = '~'
+    zerc_file = '.zerc'
+
+    if 'HOME' in os.environ and len(os.environ['HOME']) > 0:
+        home_dir = os.environ['HOME']
+
+    zerc_full_path = os.path.join( home_dir, zerc_file )
+
+    if( os.path.exists( zerc_full_path ) ):
+        try:
+            with open( zerc_full_path, 'r' ) as f:
+                all_lines = f.readlines()
+        except Exception as e:
+            print( "INFO: Unable to open {} ({})".format( zerc_full_path, e ) )
+            return( url, auth )
+        for line in all_lines:
+            line = line.strip()
+            m = re.match( '^auth\=([a-zA-Z\d]+)\s*$', line )
+            if( m ):
+                auth = m.groups()[0]
+            m = re.match( '^url\=([\w\-\,\.\+\&\=\%\:\/]+)\s*$', line )
+            if( m ):
+                url = m.groups()[0]
+    return( url, auth )
+
+def parse_program_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument( '--url', '-u', dest='url', type=str, help='URL to Zebrium API (zapi) server', required=False)
+    parser.add_argument( '--auth', '-a', dest='authToken', type=str, help='Zebrium API (zapi) authentication token', required=False)
+    parser.add_argument( '--log', '-l', dest='logName', type=str, help='Logbasename to tail', required=True)
+    parser.add_argument( '--nvp', '-n', dest='nameValues', type=str, help='Name value pairs delimited by , eg: ze_host=host1,ze_container=c1', required=False)
+    parser.add_argument( '--poll', '-p', dest='pollSecs', type=int, help='How often in seconds to poll server for new messages (min 5 secs)', default=15, required=False)
+
+    args = parser.parse_args()
+
+    return args
+
+def do_live_tail():
+    ( zerc_url, zerc_authToken ) = read_zerc()
+    args = parse_program_args()
+
+    if( args.url != None ):
+        url = args.url
+    elif( zerc_url != None ):
+        url = zerc_url
+    else:
+        print( "URL must be specified in .zerc file or on command line (-u)" )
+        sys.exit( 1 )
+
+    if( args.authToken != None ):
+        authToken = args.authToken
+    elif( zerc_authToken != None ):
+        authToken = zerc_authToken
+    else:
+        print( "Authentication token must be specified in .zerc file or on command line (-a)" )
+        sys.exit( 1 )
+
+    endpoint = get_endpoint( url )
+
+    headers = {'Content-type': 'application/json', 'Accept': 'text/plain', 'Authorization' : 'stoken '+authToken}
+    req = {}
+
+    req['logbasename'] = args.logName
+    req['nvs'] = []
+    req['sid'] = 0
+
+    if args.pollSecs < 5:
+        args.pollSecs = 5
+
+    if args.nameValues is not None and len(args.nameValues) > 0:
+        nvps = args.nameValues.split(',')
+        for nv in nvps:
+            nvs = nv.split('=')
+            if len(nvs) != 2:
+                print('Invalid nameValues {} Need = seperator for a given nvpair'.format(args.nameValues))
+                sys.exit()
+            req['nvs'].append({'name':nvs[0], 'value':nvs[1]})
+
+    # print(json.dumps(req))
+    timeout = time.time() + 60*10
+    lid = 0
+
+    while True:
+        # print('Doing http post to {} data {} headers {}'.format(url, json.dumps(req), headers))
+        r = requests.post( endpoint, data=json.dumps(req), headers=headers, verify=False)
+        if r.status_code != 200:
+            print('server error status_code {}'.format(r.status_code))
+            sys.exit()
+
+        jres = r.json()
+        estr = jres['error']
+        if len(estr) > 0:
+            print('server error string {}'.format(estr))
+            sys.exit()
+
+        # print(json.dumps(jres))
+        lines = jres['lines']
+        for l in lines:
+            print(l)
+
+        if( 'sid' in jres ):
+            req['sid'] = jres['sid']
+
+        if time.time() > timeout:
+            break
+
+        if lid < 10:
+            time.sleep(3)
+        else:
+            time.sleep(args.pollSecs)
+
+        lid = lid + 1
+
+if __name__ == '__main__':
+    do_live_tail()
