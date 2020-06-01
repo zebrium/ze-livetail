@@ -45,9 +45,10 @@ def parse_program_args():
     parser = argparse.ArgumentParser()
     parser.add_argument( '--url', '-u', dest='url', type=str, help='URL to Zebrium API (zapi) server', required=False)
     parser.add_argument( '--auth', '-a', dest='authToken', type=str, help='Zebrium API (zapi) authentication token', required=False)
-    parser.add_argument( '--log', '-l', dest='logName', type=str, help='Logbasename to tail', required=True)
+    parser.add_argument( '--log', '-l', dest='logName', type=str, default='', help='Logbasename to tail', required=False)
     parser.add_argument( '--nvp', '-n', dest='nameValues', type=str, help='Name value pairs delimited by , eg: ze_host=host1,ze_container=c1', required=False)
     parser.add_argument( '--poll', '-p', dest='pollSecs', type=int, help='How often in seconds to poll server for new messages (min 5 secs)', default=15, required=False)
+    parser.add_argument( '--op', '-o', dest='op', type=str, default='ltail', help='Operation: "ltail or lbns or zids"', required=False)
 
     args = parser.parse_args()
 
@@ -78,6 +79,8 @@ def do_live_tail():
     headers = {'Content-type': 'application/json', 'Accept': 'text/plain', 'Authorization' : 'stoken '+authToken}
     req = {}
 
+    req['version'] = 1
+    req['op'] = args.op
     req['logbasename'] = args.logName
     req['nvs'] = []
     req['sid'] = 0
@@ -112,7 +115,7 @@ def do_live_tail():
         jres = r.json()
         estr = jres['error']
         if len(estr) > 0:
-            print('server error string {}'.format(estr))
+            print('ERROR: server error string {}'.format(estr))
             sys.exit( 1 )
 
         # print(json.dumps(jres))
@@ -120,12 +123,17 @@ def do_live_tail():
         for l in lines:
             print(l)
 
+        if args.op != 'ltail':
+            break
+
         if( 'sid' in jres ):
             req['sid'] = jres['sid']
 
         if time.time() > timeout:
             break
 
+        if jres['isfull'] == True:
+            time.sleep(1)
         if lid < 10:
             time.sleep(3)
         else:
